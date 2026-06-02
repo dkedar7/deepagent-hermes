@@ -40,6 +40,21 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from typing_extensions import NotRequired
+
+
+class _ReflectionStateExt(AgentState):
+    """Schema extension so the counter / coordination fields the reflection
+    middleware emits actually persist across hooks. Without this, the field
+    updates returned from ``wrap_tool_call`` / ``before_model`` / ``after_model``
+    are silently dropped by LangGraph (same failure mode as the recorder's
+    session_id bug from 2026-06-02).
+    """
+
+    iters_since_skill: NotRequired[int]
+    turns_since_memory: NotRequired[int]
+    pending_review_kind: NotRequired[Literal["memory", "skills", "combined"] | None]
+    last_review_started_at: NotRequired[float]
 
 if TYPE_CHECKING:
     from typing_extensions import TypedDict
@@ -168,7 +183,7 @@ class ReflectionMiddleware(AgentMiddleware):
     but adds latency; v2 can move the call onto a ``threading.Thread``.
     """
 
-    state_schema = AgentState  # extended at agent-build via merge with HermesState
+    state_schema = _ReflectionStateExt
 
     def __init__(
         self,

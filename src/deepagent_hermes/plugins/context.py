@@ -21,11 +21,38 @@ rest are accepted but quietly no-op until v0.2 ships ``PluginEventBus``.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 logger = logging.getLogger(__name__)
+
+
+# ── global hook registry (read by PluginEventBus) ──────────────────
+#
+# Every ``PluginContext.register_hook(name, fn)`` call appends ``fn`` to
+# this module-level mapping in addition to the per-context ``hooks`` store
+# passed by the loader. ``PluginEventBus`` reads from here on each fire so
+# plugins registered after agent build (e.g. via a future hot-reload path)
+# still get their callbacks fired, and so test harnesses don't need to
+# thread a registry through the loader to make hooks observable.
+#
+# Keys are hook names from ``VALID_HOOKS``; values are lists of callables
+# in registration order. Use ``get_global_hook_registry()`` to access.
+
+_GLOBAL_HOOK_REGISTRY: dict[str, list[Callable[..., Any]]] = defaultdict(list)
+
+
+def get_global_hook_registry() -> dict[str, list[Callable[..., Any]]]:
+    """Return the module-level hook registry that ``PluginEventBus`` reads.
+
+    Mutating the returned dict mutates the live registry — this is
+    intentional so test fixtures can clear it between cases:
+
+        get_global_hook_registry().clear()
+    """
+    return _GLOBAL_HOOK_REGISTRY
 
 
 # ── hook registry ───────────────────────────────────────────────────
@@ -213,6 +240,11 @@ class PluginContext:
             raise TypeError(
                 f"PluginContext.register_hook: unknown hooks store {type(self.hooks).__name__}"
             )
+        # Also append to the module-level registry that PluginEventBus reads.
+        # Loader-provided ``hooks`` store stays the authoritative per-discovery
+        # record; the global mirror exists so the event bus has a stable
+        # lookup target without being threaded through every constructor.
+        _GLOBAL_HOOK_REGISTRY[name].append(fn)
         self._plugin.hooks_registered.append(name)
         if name not in _WIRED_HOOKS_V1:
             logger.debug(
@@ -268,4 +300,5 @@ __all__ = [
     "LoadedPlugin",
     "PluginContext",
     "VALID_HOOKS",
+    "get_global_hook_registry",
 ]

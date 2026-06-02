@@ -12,7 +12,9 @@ from deepagent_hermes.plugins.context import (
     VALID_HOOKS,
     LoadedPlugin,
     PluginContext,
+    get_global_hook_registry,
 )
+from deepagent_hermes.plugins.event_bus import PluginEventBus
 from deepagent_hermes.plugins.loader import (
     ENTRY_POINTS_GROUP,
     HermesPluginLoader,
@@ -23,5 +25,7 @@ __all__ = [
     "HermesPluginLoader",
     "LoadedPlugin",
     "PluginContext",
+    "PluginEventBus",
     "VALID_HOOKS",
+    "get_global_hook_registry",
 ]

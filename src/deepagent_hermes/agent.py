@@ -38,6 +38,7 @@ from deepagent_hermes.config import HermesConfig
 from deepagent_hermes.curator import CuratorMiddleware
 from deepagent_hermes.memory.provider import get_provider
 from deepagent_hermes.memory.tool import MemoryToolMiddleware
+from deepagent_hermes.plugins.event_bus import PluginEventBus
 from deepagent_hermes.prompts import PromptAssemblyMiddleware
 from deepagent_hermes.reflection import ReflectionMiddleware, build_review_subagent
 from deepagent_hermes.search.session_search import make_session_search_tool
@@ -145,13 +146,26 @@ def create_hermes_agent(
     fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=False)
 
     # ── review subagent (reflection target) ──────────────────────────────
-    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model)
+    # Wire the memory + skill_manage tools so the review fork can actually
+    # write — without these, the subagent runs but has no way to act on its
+    # conclusions, and the closed loop never closes.
+    _memory_mw_for_tools = MemoryToolMiddleware(
+        memory_char_limit=cfg.memory_char_limit,
+        user_char_limit=cfg.memory_user_char_limit,
+    )
+    review_tools = [*skill_tools, *_memory_mw_for_tools.tools]
+    review_subagent = build_review_subagent(
+        library=library, store=store, aux_model=aux_model, tools=review_tools
+    )
 
     # ── compose the middleware stack (SPEC §4 order) ─────────────────────
     # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in
     # its own create_deep_agent; we do it ourselves to control ordering.
     middleware: list[Any] = [
-        # Budget first — it can short-circuit before anything else runs.
+        # PluginEventBus is OUTERMOST so plugin hooks see the unmodified
+        # request and the final response (per its module docstring).
+        PluginEventBus(),
+        # Budget next — it can short-circuit before anything else runs.
         IterationBudgetMiddleware(max_iterations=cfg.agent_max_iterations),
         # Prompt assembly owns the system prompt (outermost wrap so the
         # skill loader's mutation lands on top of the assembled prompt).

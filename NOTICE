@@ -36,3 +36,19 @@ repository is cited inline in the corresponding .md file under prompts/.
 Nous Research is the originator of these ideas; this project's contribution is
 the reproduction on a different framework substrate (LangGraph + deepagents +
 langgraph-stream-parser instead of Hermes's native runtime).
+
+In addition to the design adaptations above, the v0.1.0a1 release bundles 26
+SKILL.md files copied verbatim from the Hermes Agent ``skills/`` directory
+under the following categories: software-development, github, research,
+data-science, mlops, productivity, and note-taking. Each SKILL.md retains its
+original frontmatter, including the ``author`` field crediting the original
+contributor(s) and the ``license: MIT`` field. The bundled set is a curated
+subset chosen to align with this project owner's stated use cases; the full
+Hermes skill catalog (90+ skills in ``skills/`` plus 86+ in
+``optional-skills/``) is available at
+https://github.com/nousresearch/hermes-agent/tree/main/skills.
+
+Some bundled skills were originally adapted by Hermes Agent from upstream
+sources (e.g. the ``systematic-debugging`` skill is credited as "adapted from
+obra/superpowers" in its own frontmatter). Those upstream attributions are
+preserved verbatim in the corresponding SKILL.md files.

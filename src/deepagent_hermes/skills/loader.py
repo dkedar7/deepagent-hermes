@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest
+from langchain.agents.middleware.types import AgentMiddleware, AgentState, ModelRequest
+from typing_extensions import NotRequired
 
 from deepagent_hermes.skills.library import SkillLibrary
 from deepagent_hermes.skills.prompt import build_skills_system_prompt
@@ -28,6 +29,15 @@ __all__ = ["SkillLoaderMiddleware"]
 _BANNER = "## Loaded skills"
 
 
+class _SkillLoaderStateExt(AgentState):
+    """Declare ``active_skills`` + ``loaded_skill_bodies`` on the merged graph
+    state schema so the ``skill_view`` tool's state updates persist.
+    """
+
+    active_skills: NotRequired[list[str]]
+    loaded_skill_bodies: NotRequired[dict[str, str]]
+
+
 class SkillLoaderMiddleware(AgentMiddleware):
     """Inject the skills index + any loaded skill bodies into the system prompt.
 
@@ -38,6 +48,8 @@ class SkillLoaderMiddleware(AgentMiddleware):
     context for the rest of the session without re-emitting through tool
     results.
     """
+
+    state_schema = _SkillLoaderStateExt
 
     def __init__(self, library: SkillLibrary) -> None:
         super().__init__()

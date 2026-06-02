@@ -118,12 +118,16 @@ class AnthropicCachingS3Middleware(AnthropicPromptCachingMiddleware):
         cache_control = self._cache_control
         overrides: dict[str, Any] = {}
 
-        # Keep the parent's model-settings nudge — Bedrock transport needs the
-        # top-level kwarg to expand into block-level breakpoints correctly.
-        overrides["model_settings"] = {
-            **request.model_settings,
-            "cache_control": cache_control,
-        }
+        # We do NOT set ``model_settings["cache_control"]`` even though the
+        # parent class does — on the Anthropic Messages API that nudge causes
+        # langchain-anthropic to add an extra cache_control breakpoint on the
+        # tools block. Combined with our explicit system + last-3 tagging,
+        # that pushes total breakpoints to 5 and trips the per-request cap
+        # (Anthropic allows at most 4). The Bedrock transport that the parent
+        # was accommodating is not in scope for ``system_and_3``; if/when
+        # someone wires this middleware behind Bedrock, the trade-off (lose
+        # one message breakpoint for the model_settings nudge) becomes a
+        # config choice.
 
         # System message (1 breakpoint when present, content non-empty).
         if request.system_message is not None:

@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from deepagent_hermes.cron import jobs as cron_jobs
+from deepagent_hermes.cron.deliverers import get_deliverer
 
 logger = logging.getLogger(__name__)
 
@@ -230,20 +231,39 @@ def _build_output_doc(
     )
 
 
-def _deliver(job: dict[str, Any], *, response: str) -> None:
-    """Deliver the response per ``job['deliver']``.
+def _deliver_output(
+    job: dict[str, Any],
+    output: str,
+    output_path: Path | None,
+) -> None:
+    """Dispatch ``output`` to the deliverer named by ``job['deliver']``.
 
-    v1 supports only ``"local"`` (no-op beyond the on-disk write the caller
-    already did). Other deliverers raise ``NotImplementedError`` so future
-    plumbing surfaces loudly instead of silently dropping output.
+    SILENT_MARKER suppression is honored here (no deliverer is invoked).
+    Unknown deliverer names log a warning and fall back to ``"local"``
+    so a typo in jobs.json never silently drops output. The selected
+    deliverer's exceptions propagate; callers (``run_job``) catch and
+    record them as ``last_delivery_error``.
     """
-    target = (job.get("deliver") or "local").lower()
-    if target == "local":
+    if output.startswith(SILENT_MARKER):
         return
-    raise NotImplementedError(
-        f"deliver={target!r} is not implemented in deepagent-hermes v0.1 "
-        "(local-only). See SPEC §14.4."
-    )
+    deliverer_name = (job.get("deliver") or "local").lower()
+    if deliverer_name == "origin":
+        # 'origin' = "use whatever the job's origin specified"; for v1
+        # we fall through to local. Origin-aware routing is future work.
+        deliverer_name = "local"
+    deliverer_cls = get_deliverer(deliverer_name)
+    if deliverer_cls is None:
+        logger.warning(
+            "cron: no deliverer registered for %r; using local", deliverer_name
+        )
+        deliverer_cls = get_deliverer("local")
+        assert deliverer_cls is not None, "LocalDeliverer should always be registered"
+    try:
+        deliverer_cls().deliver(job, output, output_path=output_path)
+    except Exception:
+        logger.exception("cron deliverer %r failed", deliverer_name)
+        # caller updates last_delivery_error
+        raise
 
 
 def run_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -277,9 +297,7 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
             silent = not body.strip()
             if not silent and ok:
                 try:
-                    _deliver(job, response=body)
-                except NotImplementedError as e:
-                    delivery_error = str(e)
+                    _deliver_output(job, body, output_path)
                 except Exception as e:  # pragma: no cover - defensive
                     delivery_error = f"{type(e).__name__}: {e}"
         else:
@@ -290,9 +308,7 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
             silent = response.strip().startswith(SILENT_MARKER)
             if not silent:
                 try:
-                    _deliver(job, response=response)
-                except NotImplementedError as e:
-                    delivery_error = str(e)
+                    _deliver_output(job, response, output_path)
                 except Exception as e:  # pragma: no cover - defensive
                     delivery_error = f"{type(e).__name__}: {e}"
     except Exception as e:  # pragma: no cover - top-level safety net

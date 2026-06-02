@@ -30,6 +30,21 @@ when a profile is set, else ``deepagent_hermes``. Override via
 
 Recall modes mirror Hermes: ``hybrid`` (default), ``context``, ``tools``.
 Legacy ``auto`` aliases to ``hybrid``.
+
+SDK shape (honcho-ai >= 2.0, imported as ``honcho``):
+
+    from honcho import Honcho, MessageCreateParams
+    client = Honcho(api_key=..., environment=..., base_url=..., workspace_id=...)
+    user_peer = client.peer("user")
+    ai_peer   = client.peer("assistant")
+    session   = client.session(session_id, peers=[user_peer, ai_peer])
+    session.add_messages(MessageCreateParams(peer_id="user", content="..."))
+    page      = session.messages(size=20, reverse=True)
+    answer    = user_peer.chat("what does the user like?", session=session)
+
+The workspace is set **on the client**, not on a sub-resource. There is no
+``workspaces.get_or_create(name=...)`` chain in v2 — pre-v2 doc snippets
+that show that pattern are stale.
 """
 
 from __future__ import annotations
@@ -38,6 +53,7 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Literal
 
@@ -116,8 +132,8 @@ def _resolve_workspace(config: dict[str, Any]) -> str:
     Order: explicit ``DEEPAGENT_HERMES_HONCHO_HOST`` env → config
     ``workspace`` → ``deepagent_hermes_<profile_sanitized>`` → ``deepagent_hermes``.
 
-    "Sanitized" = lowercase, non-alphanumerics → underscore — matches how
-    Hermes derives the host key from profile names.
+    "Sanitized" = lowercase, non-alphanumerics → underscore, truncate to 50 —
+    matches how Hermes derives the host key from profile names.
     """
     env_override = os.environ.get("DEEPAGENT_HERMES_HONCHO_HOST")
     if env_override:
@@ -128,6 +144,7 @@ def _resolve_workspace(config: dict[str, Any]) -> str:
     profile = os.environ.get("DEEPAGENT_HERMES_PROFILE", "").strip()
     if profile:
         sanitized = re.sub(r"[^a-z0-9_]+", "_", profile.lower()).strip("_")
+        sanitized = sanitized[:50]  # truncate per spec
         if sanitized:
             return f"deepagent_hermes_{sanitized}"
     return "deepagent_hermes"
@@ -167,9 +184,19 @@ class HonchoProvider(MemoryProvider):
         self._client: Any | None = None
         self._workspace: str | None = None
         self._peer_id: str | None = None  # user peer
-        self._ai_peer_id: str = "ai"      # constant for now; Hermes lets SOUL.md override
+        self._ai_peer_id: str = "assistant"  # constant for now; Hermes lets SOUL.md override
         self._session_id: str | None = None
         self._config: dict[str, Any] = {}
+
+        # SDK resource handles, cached after setup_session.
+        self._user_peer: Any | None = None
+        self._ai_peer: Any | None = None
+        self._session: Any | None = None
+
+        # Provider can be hit from the main agent thread AND the reflection
+        # subagent thread. Honcho SDK calls aren't documented thread-safe;
+        # serialise writes (and the setup/teardown lifecycle) with one lock.
+        self._lock = threading.RLock()
 
     # ── lifecycle ──
 
@@ -179,6 +206,9 @@ class HonchoProvider(MemoryProvider):
         Raises a helpful ``ImportError`` (with the install command) on a
         missing ``honcho-ai`` package — the user shouldn't have to read the
         traceback to learn how to fix it.
+
+        Idempotent: safe to call twice. Uses ``client.peer(id)`` /
+        ``client.session(id)`` which are get-or-create under the hood.
         """
         try:
             from honcho import Honcho  # noqa: PLC0415  — lazy import is the point
@@ -188,89 +218,105 @@ class HonchoProvider(MemoryProvider):
                 "Install with: pip install deepagent-hermes[honcho]"
             ) from e
 
-        self._config = _load_config()
-        self._workspace = _resolve_workspace(self._config)
-        self._peer_id = user_id or self._config.get("user_peer", "user")
-        self._session_id = session_id
+        with self._lock:
+            self._config = _load_config()
+            self._workspace = _resolve_workspace(self._config)
+            self._peer_id = user_id or self._config.get("user_peer", "user")
+            self._session_id = session_id
 
-        # Honcho client kwargs — only pass non-None so we don't trip the SDK's
-        # "you can't combine these" guards (e.g. base_url + environment).
-        client_kwargs: dict[str, Any] = {}
-        if self._config.get("api_key"):
-            client_kwargs["api_key"] = self._config["api_key"]
-        if self._config.get("environment"):
-            client_kwargs["environment"] = self._config["environment"]
-        if self._config.get("base_url"):
-            client_kwargs["base_url"] = self._config["base_url"]
+            # Honcho client kwargs — only pass non-None so we don't trip the SDK's
+            # default-handling (some kwargs use sentinel FieldInfo defaults that
+            # break if you pass an explicit None for an unset value).
+            client_kwargs: dict[str, Any] = {"workspace_id": self._workspace}
+            if self._config.get("api_key"):
+                client_kwargs["api_key"] = self._config["api_key"]
+            if self._config.get("environment"):
+                client_kwargs["environment"] = self._config["environment"]
+            if self._config.get("base_url"):
+                client_kwargs["base_url"] = self._config["base_url"]
 
-        try:
-            self._client = Honcho(**client_kwargs)
-            # TODO(honcho-impl): the real SDK surface is
-            #   workspace = client.workspaces[self._workspace]
-            #   peer = workspace.peers[self._peer_id]
-            #   session = workspace.sessions[self._session_id]
-            # Calling those here would warm caches; we defer to first use
-            # because the SDK does its own lazy init.
-        except Exception as e:  # noqa: BLE001 — log + degrade, don't crash the agent
-            logger.warning("HonchoProvider: client init failed: %s", e)
-            self._client = None
+            try:
+                self._client = Honcho(**client_kwargs)
+                # get_or_create on the SDK — these calls are idempotent and
+                # cheap (the SDK caches the local object; server-side it's a
+                # PUT-with-if-not-exists).
+                self._user_peer = self._client.peer(self._peer_id)
+                self._ai_peer = self._client.peer(self._ai_peer_id)
+                # Attach both peers at session creation so dialectic queries
+                # have the right relational graph from turn 1. The SDK accepts
+                # PeerBase instances directly.
+                self._session = self._client.session(
+                    self._session_id,
+                    peers=[self._user_peer, self._ai_peer],
+                )
+            except Exception as e:  # noqa: BLE001 — log + degrade, don't crash the agent
+                logger.warning("HonchoProvider: client init failed: %s", e)
+                self._client = None
+                self._user_peer = None
+                self._ai_peer = None
+                self._session = None
 
     def recall(self, query: str, mode: RecallMode = "hybrid") -> list[str]:
         """Return cross-session context snippets.
 
-        ``tools`` mode short-circuits to ``[]`` — by spec, tools-mode users
-        invoke the provider's tools explicitly and want zero auto-injection.
+        Mode mapping (per SPEC):
 
-        ``context`` and ``hybrid`` modes call ``peer.context()`` (cheap, no
-        LLM) and optionally ``peer.chat()`` (LLM reasoning) under hybrid.
-        Failures degrade to ``[]`` with a warning — never raise back to the
-        prompt builder.
+        - ``hybrid`` — combine ``peer.chat(query)`` with last 5 session messages
+          for short-term context. Default; the most useful all-purpose mix.
+        - ``context`` — only last 20 ``session.messages()`` (no LLM call).
+        - ``tools`` — only ``peer.chat(query)`` (longer-term reasoning, no
+          short-term echo).
+
+        Failures **always** degrade to ``[]`` with a logged warning — losing
+        recall is preferable to crashing the agent.
         """
+        # auto → hybrid (legacy alias)
         if mode == "auto":  # type: ignore[comparison-overlap]
             mode = "hybrid"
-        if mode == "tools":
-            return []
-        if not self._client or not self._workspace or not self._peer_id:
+        if not self._client or not self._user_peer or not self._session:
             return []
         if not query or not query.strip():
             return []
 
-        # The SDK shape is roughly:
-        #   workspace = client.workspaces[self._workspace]
-        #   peer      = workspace.peers[self._peer_id]
-        #   ctx       = peer.context(query=query, max_tokens=...)
-        # We wrap that pattern in a try/except so SDK upgrades that move
-        # methods around don't take down the agent — we log and return [].
         results: list[str] = []
         try:
-            workspace = self._client.workspaces[self._workspace]
-            peer = workspace.peers[self._peer_id]
-
-            # Context call — cheap, available in all modes that inject.
-            try:
-                ctx = peer.context(query=query) if hasattr(peer, "context") else None
-                if ctx:
-                    text = getattr(ctx, "text", None) or str(ctx)
-                    if text and text.strip():
-                        results.append(text.strip())
-            except Exception as e:  # noqa: BLE001
-                logger.debug("HonchoProvider.recall: peer.context() failed: %s", e)
-
-            # Hybrid adds a dialectic .chat() call for synthesized answers.
-            # Context-only mode skips this to save tokens.
-            if mode == "hybrid":
+            # --- dialectic chat call (hybrid + tools) ---
+            if mode in ("hybrid", "tools"):
                 try:
-                    reply = (
-                        peer.chat(query, reasoning_level="low")
-                        if hasattr(peer, "chat")
-                        else None
+                    reply = self._user_peer.chat(
+                        query,
+                        session=self._session,
+                        reasoning_level="low",
                     )
+                    # peer.chat returns Optional[str] per the v2 SDK signature.
                     if reply:
-                        text = getattr(reply, "content", None) or str(reply)
-                        if text and text.strip() and text not in results:
+                        text = reply if isinstance(reply, str) else (
+                            getattr(reply, "content", None) or str(reply)
+                        )
+                        if text and text.strip():
                             results.append(text.strip())
                 except Exception as e:  # noqa: BLE001
                     logger.debug("HonchoProvider.recall: peer.chat() failed: %s", e)
+
+            # --- short-term context (hybrid + context) ---
+            if mode in ("hybrid", "context"):
+                try:
+                    # hybrid wants a small recent tail; context wants more.
+                    size = 5 if mode == "hybrid" else 20
+                    # session.messages() returns a SyncPage iterable of Message
+                    # objects with .content + .peer_id attrs.
+                    page = self._session.messages(size=size, reverse=True)
+                    items = list(page) if page is not None else []
+                    for msg in items:
+                        text = getattr(msg, "content", None)
+                        if not text:
+                            continue
+                        peer_id = getattr(msg, "peer_id", "") or ""
+                        snippet = f"[{peer_id}] {text}".strip() if peer_id else text.strip()
+                        if snippet and snippet not in results:
+                            results.append(snippet)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("HonchoProvider.recall: session.messages() failed: %s", e)
         except Exception as e:  # noqa: BLE001
             logger.warning("HonchoProvider.recall: unexpected error: %s", e)
             return []
@@ -280,47 +326,84 @@ class HonchoProvider(MemoryProvider):
     def record_turn(self, role: str, content: str) -> None:
         """Push one message into the Honcho session for user-model learning.
 
-        Best-effort: failures only log. The agent must never stall because the
-        memory provider's backend is slow.
+        Role mapping:
+          - ``user`` → user_peer
+          - ``assistant`` → assistant_peer
+          - anything else (``tool``, ``system``, …) → skip silently. Honcho's
+            user model expects bilateral dialogue; tool traces would just be
+            noise in the dialectic index.
+
+        Best-effort: failures only log at DEBUG. The agent must never stall
+        because the memory provider's backend is slow.
         """
-        if not self._client or not self._workspace or not self._session_id:
+        if not self._client or not self._session:
             return
         if not content or not content.strip():
             return
 
+        # Map role → peer_id. Unknown roles are dropped on the floor on purpose.
+        if role == "user":
+            peer_id = self._peer_id
+        elif role == "assistant":
+            peer_id = self._ai_peer_id
+        else:
+            return
+
+        if not peer_id:
+            return
+
         try:
-            workspace = self._client.workspaces[self._workspace]
-            session = workspace.sessions[self._session_id]
-            # SDK shape:
-            #   session.messages.create(peer_id=..., role=..., content=...)
-            # The exact kwargs vary across SDK versions; we try the modern
-            # shape first and fall back to the older one.
-            messages = getattr(session, "messages", None)
-            if messages is None:
-                return
-            peer_id = self._peer_id if role == "user" else self._ai_peer_id
-            if hasattr(messages, "create"):
-                messages.create(peer_id=peer_id, role=role, content=content)
-            elif hasattr(session, "add_message"):
-                session.add_message(role, content)
-            # If neither hook exists, the SDK has drifted — log once and move
-            # on. We don't want a per-turn log explosion.
-            else:
-                logger.debug(
-                    "HonchoProvider.record_turn: no known message-add API on session"
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.debug("HonchoProvider.record_turn: %s", e)
+            # Lazy-import MessageCreateParams here — if the import fails (SDK
+            # missing/drifted) we want the existing except to swallow it
+            # rather than crashing record_turn.
+            from honcho import MessageCreateParams  # noqa: PLC0415
+        except ImportError as e:
+            logger.debug("HonchoProvider.record_turn: MessageCreateParams import failed: %s", e)
+            return
+
+        with self._lock:
+            try:
+                params = MessageCreateParams(peer_id=peer_id, content=content)
+                self._session.add_messages(params)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("HonchoProvider.record_turn: %s", e)
 
     def teardown(self) -> None:
-        """Best-effort flush. No threads to join in this straight-line port."""
-        # TODO(honcho-impl): when the background prefetch/sync threads from
-        # the Hermes implementation get ported, join them here with a sane
-        # timeout (Hermes uses 5-10s). For now there's nothing to do.
-        self._client = None
-        self._workspace = None
-        self._peer_id = None
-        self._session_id = None
+        """Best-effort flush + handle release.
+
+        Honcho's v2 SDK doesn't expose a ``Session.close()`` (sessions are
+        server-side resources; clients are stateless HTTP wrappers). We still
+        try ``.close()`` if it appears in a future SDK version, then drop
+        local refs so a re-``setup_session`` rebuilds cleanly.
+
+        We do NOT delete the session — keep it for future recall across runs.
+        """
+        with self._lock:
+            session = self._session
+            client = self._client
+
+            # Future: when the background prefetch/sync threads from the full
+            # Hermes port land, join them here with a sane timeout (Hermes uses
+            # 5-10s). Straight-line v1 has no threads of its own so there's
+            # nothing extra to flush beyond the SDK-level close() calls below.
+
+            for resource in (session, client):
+                if resource is None:
+                    continue
+                close = getattr(resource, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("HonchoProvider.teardown: close() failed: %s", e)
+
+            self._client = None
+            self._user_peer = None
+            self._ai_peer = None
+            self._session = None
+            self._workspace = None
+            self._peer_id = None
+            self._session_id = None
 
 
 # Self-register at import time so `get_provider("honcho")` works once the

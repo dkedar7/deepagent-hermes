@@ -30,12 +30,22 @@ from typing import Any
 from langchain.agents.middleware import hook_config
 from langchain.agents.middleware.types import (
     AgentMiddleware,
+    AgentState,
 )
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from typing_extensions import NotRequired
 
 _DEFAULT_REFUND_TOOLS: tuple[str, ...] = ("execute_code",)
+
+
+class _BudgetStateExt(AgentState):
+    """Declare ``iteration_budget_remaining`` on the merged graph state schema
+    so the middleware's seed + decrement actually persist across hooks.
+    """
+
+    iteration_budget_remaining: NotRequired[int]
 
 
 def _state_get(state: Any, key: str, default: Any = None) -> Any:
@@ -57,12 +67,15 @@ class IterationBudgetMiddleware(AgentMiddleware):
             outer agent's per-turn cap.
     """
 
+    state_schema = _BudgetStateExt
+
     def __init__(
         self,
         max_iterations: int = 90,
         *,
         refund_tools: tuple[str, ...] = _DEFAULT_REFUND_TOOLS,
     ) -> None:
+        super().__init__()
         self.max_iterations = max_iterations
         self.refund_tools = tuple(refund_tools)
 
