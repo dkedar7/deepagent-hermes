@@ -1,8 +1,12 @@
 # deepagent-hermes
 
+[![PyPI](https://img.shields.io/pypi/v/deepagent-hermes.svg)](https://pypi.org/project/deepagent-hermes/)
+[![Python](https://img.shields.io/pypi/pyversions/deepagent-hermes.svg)](https://pypi.org/project/deepagent-hermes/)
+[![License](https://img.shields.io/pypi/l/deepagent-hermes.svg)](./LICENSE)
+
 A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langgraph-stream-parser`](https://github.com/dkedar7/langgraph-stream-parser).
 
-**Status: pre-alpha (v0.1.0a0).** Spec at [SPEC.md](./SPEC.md). Code is scaffolded; most subsystems work end-to-end but the bundled-skills library is empty and 5 of 6 terminal backends are stubs.
+**Status: v0.1.0 live on PyPI.** Spec at [SPEC.md](./SPEC.md). Release notes in [CHANGELOG.md](./CHANGELOG.md). The runtime is verified end-to-end against a real Anthropic model — both the memory loop and the skill-creation loop close autonomously; see [`examples/dogfood.py`](./examples/dogfood.py) and [`examples/dogfood_procedural.py`](./examples/dogfood_procedural.py) for the traces.
 
 ## What it is
 
@@ -13,28 +17,35 @@ A `deepagents`-built agent with a **closed reflection→skill-creation loop**:
 - A weekly **curator** consolidates skills into umbrellas and archives stale ones.
 - A **frozen-snapshot memory** (`MEMORY.md` + `USER.md`) preserves prefix-cache hits for the entire session.
 - **FTS5 session search** indexes every past conversation in a local SQLite DB.
-- Optional **Honcho user model** for dialectic cross-session user profiling.
+- Bundled **MarkdownProvider** that keyword-searches `<HERMES_HOME>/memories/notes/*.md` — drop hand-authored long-form context there and the agent surfaces relevant sections on demand. Zero external dependencies.
 
 Designed to be loaded into the existing `deepagent-*` host family ([`deepagent-code`](https://github.com/dkedar7/deepagent-code), [`deepagent-lab`](https://github.com/dkedar7/deepagent-lab), [`cowork-dash`](https://github.com/dkedar7/cowork-dash), [`deepagent-vscode`](https://github.com/dkedar7/deepagent-vscode)) without UI changes — set `DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph` in any of them.
 
 ## Installation
 
 ```bash
-# central venv per the deepagent-* convention
-uv venv "$env:USERPROFILE\.venvs\deepagent-hermes"
-. "$env:USERPROFILE\.venvs\deepagent-hermes\Scripts\Activate.ps1"
-
-# while langgraph-stream-parser v0.2.0 is unreleased, install editable
-uv pip install -e "..\langgraph-stream-parser"
-
-uv pip install -e .
-
-# optional extras
-uv pip install -e ".[honcho]"     # Honcho user-model provider
-uv pip install -e ".[modal]"      # Modal sandbox backend
-uv pip install -e ".[daytona]"    # Daytona sandbox backend
-uv pip install -e ".[dev]"        # tests + lint
+pip install deepagent-hermes
 ```
+
+Or with `uv` (recommended):
+
+```bash
+uv venv .venv
+. .venv/Scripts/activate      # Windows
+. .venv/bin/activate          # macOS / Linux
+uv pip install deepagent-hermes
+```
+
+### Optional extras
+
+```bash
+pip install "deepagent-hermes[daytona]"    # Daytona sandbox terminal backend
+pip install "deepagent-hermes[modal]"      # Modal sandbox terminal backend
+pip install "deepagent-hermes[ssh]"        # paramiko-backed SSH terminal backend
+pip install "deepagent-hermes[dev]"        # tests + lint (contributors only)
+```
+
+`ANTHROPIC_API_KEY` is required for the default model (`anthropic:claude-sonnet-4-5-20250929`). Swap the model via `--model` on the CLI or `model.default` in `deepagent-hermes.toml` — any [`init_chat_model`](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html) string works.
 
 ## Quick start
 
@@ -95,26 +106,29 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 
 | Subsystem | Status |
 |---|---|
-| Config + state + agent factory | working |
-| Reflection loop (10-iter trigger, subagent review) | working |
-| Skill library + agentskills.io validator | working |
-| Skill loader (`@dynamic_prompt`) | working |
-| `skill_view` / `skill_manage` / `skills_list` tools | working |
-| Frozen-snapshot memory (MEMORY.md / USER.md) | working |
-| SQLite FTS5 store + `session_search` (3 modes) | working |
-| Honcho provider | stub (extras-gated) |
-| Iteration budget middleware | working |
-| Compression middleware (13-section template) | working |
-| Anthropic `system_and_3` caching strategy | working |
-| Tool registry + 33-toolset enum | working |
-| `LocalEnvironment` terminal backend | working |
-| Docker / SSH / Daytona / Modal / Singularity backends | stubs (`NotImplementedError`) |
-| Cron daemon + `cronjob` tool | basic (local delivery only) |
-| Plugin loader (4 discovery sources) | working (5 of 17 hooks) |
-| CLI + v1-essentials slash commands | working |
-| Curator (skill lifecycle) | basic |
-| Self-evolution integration | docs only (separate offline repo) |
-| Bundled skills | none — ship your own under `~/.deepagent-hermes/skills/` |
+| Config + state + agent factory | ✅ working |
+| Reflection loop (10-iter / 10-turn triggers, subagent review) | ✅ working — verified live |
+| Skill library + agentskills.io validator | ✅ working |
+| Skill loader (system-prompt injection + progressive disclosure) | ✅ working |
+| `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
+| Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously) |
+| SQLite FTS5 store + `session_search` (3 modes) | ✅ working |
+| `MarkdownProvider` (bundled, default) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps |
+| Iteration budget middleware | ✅ working |
+| Compression middleware (13-section template) | ✅ working |
+| Anthropic `system_and_3` caching strategy | ✅ working |
+| Tool registry + 33-toolset enum | ✅ working |
+| `LocalEnvironment` terminal backend | ✅ working (Git Bash on Windows) |
+| `DockerEnvironment` | ✅ working (gated on `docker info` reachability) |
+| `SshEnvironment` | ✅ working (paramiko-backed, behind `[ssh]` extra) |
+| `SingularityEnvironment` | ✅ working (auto-detects `singularity` / `apptainer`) |
+| `DaytonaEnvironment` / `ModalEnvironment` | ✅ lazy SDK with defensive attribute probing (extras-gated) |
+| Cron daemon + `cronjob` tool | ✅ working (deliverers: `local`, `stdout`, `agentmail`) |
+| Plugin loader (4 discovery sources) | ✅ working (13 of 17 lifecycle hooks wired) |
+| CLI + v1-essentials slash commands | ✅ working |
+| Curator (skill lifecycle) | ✅ basic |
+| Bundled skills | ✅ 26 from `nousresearch/hermes-agent` (MIT, attributed) |
+| Self-evolution integration | 📄 docs only (separate offline repo) |
 
 ## License
 

@@ -5,6 +5,44 @@ All notable changes to `deepagent-hermes` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-06-03
+
+### Changed — bundled memory provider
+
+- **Replaced `HonchoProvider` with `MarkdownProvider`** as the bundled `MemoryProvider`. The `MemoryProvider` ABC and plug-in slot are unchanged; out-of-tree providers (mem0 / Honcho / embeddings-backed / etc.) can still register via the `deepagent_hermes.plugins` entry-point group.
+  - `MarkdownProvider` recalls relevant sections from `<HERMES_HOME>/memories/notes/*.md` via keyword overlap. Splits each `.md` at H1/H2/H3 boundaries; ranks results by matching-token count then by section length (shorter wins on ties for focus); returns top-N sections with a `_From <file>:_` prefix.
+  - Pure Python, zero external dependencies. ~60 lines of provider + a ~30-line pure-function recall helper (`search_notes`) that's directly callable from tooling or tests without instantiating the provider.
+  - 20 new tests in `tests/test_markdown_provider.py`.
+  - Rationale: the bundled `MEMORY.md` / `USER.md` (frozen-snapshot, ≤2200 + ≤1375 chars) already covers the "user model" surface in-prompt. The interesting unmet need was long-form context too big for the system prompt — exactly what hand-authored or agent-written `notes/*.md` solves. A service dependency for that surface didn't pay rent.
+
+### Removed
+
+- `honcho_provider` builtin plug-in directory.
+- `tests/test_honcho_provider.py`, `examples/honcho_verify.py`, `examples/dogfood_honcho.py`.
+- `[honcho]` optional dependency from `pyproject.toml`.
+- `needs_honcho` pytest marker.
+- `honcho.json` from `.gitignore` (no longer a known config path).
+
+### Fixed
+
+- Workspace virtual-mode bug surfaced in the v0.1.0 dogfood — `FilesystemBackend` now uses `virtual_mode=True` so the agent's `/workspace/foo.py` paths resolve inside the configured root instead of the literal filesystem `/workspace/`.
+- Tools returning `Command` (`skill_view`, `skill_manage`) now inject `tool_call_id` via `Annotated[str, InjectedToolCallId]` instead of hard-coding `""`; LangGraph's ToolNode requires every tool call to produce a matching `ToolMessage`.
+- Parallel-write `InvalidUpdateError` on counter state — added `Annotated[T, reducer]` to `iters_since_skill` / `turns_since_memory` / `iteration_budget_remaining` / `memory_snapshot` / `session_id` and friends. Parent + subagent writes in the same superstep now compose cleanly.
+- `IterationBudgetMiddleware.before_agent` now seeds when the budget is None **or** 0 (LangGraph coerces `NotRequired[int]` to 0 at schema-merge time, which previously made the seed a no-op and every agent invocation immediately exhausted).
+
+### Verified
+
+- 393 tests pass / 2 skipped (Docker / Singularity gated by binary presence).
+- `ruff check` clean across `src/` `tests/` `examples/`.
+- Live model round-trips:
+  - Single-turn smoke (`examples/live_smoke.py`).
+  - 5-turn reflection-trigger trace.
+  - 12-turn substantive dogfood — agent autonomously wrote 702 bytes of USER.md across 3 distinct topics and self-refined its own memory at the final turn.
+  - 8-turn procedural dogfood — agent autonomously wrote a `SKILL.md` (`python-performance-investigation`).
+  - Host-adoption smoke through `deepagent-code`'s `CodeConfig` (full `DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph` round-trip).
+
+[0.1.1]: https://github.com/dkedar7/deepagent-hermes/releases/tag/v0.1.1
+
 ## [0.1.0] — 2026-06-02
 
 Initial public release. A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langgraph-stream-parser`](https://github.com/dkedar7/langgraph-stream-parser).

@@ -20,7 +20,6 @@ import tempfile
 import time
 from pathlib import Path
 
-
 # Two scripts with deliberate inefficiencies — the agent will exercise the
 # same investigation pattern on both.
 SLOW_SCRIPT_1 = '''\

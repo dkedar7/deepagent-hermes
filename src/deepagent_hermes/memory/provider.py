@@ -4,14 +4,16 @@ A memory provider is a single-select plug-in slot. The agent loads at most one
 provider — selected by ``config.memory.provider`` (default ``""`` → no-op).
 
 Bundled providers register themselves at import time via
-``register_provider("honcho", HonchoProvider)``. Third-party plug-ins discovered
-through the plugin loader (SPEC §15) can register additional providers the
-same way.
+``register_provider("markdown", MarkdownProvider)`` (the zero-dep default —
+keyword search over ``<HERMES_HOME>/memories/notes/*.md``). Third-party plug-ins
+discovered through the plugin loader (SPEC §15) can register additional
+providers the same way — e.g. an out-of-tree ``honcho`` provider, an embeddings-
+backed one, or a service like ``mem0``.
 
 Lifecycle:
 
-1. ``setup_session(session_id, user_id)`` — called by ``HonchoMiddleware`` at
-   ``before_agent`` time, once per session.
+1. ``setup_session(session_id, user_id)`` — called at ``before_agent`` time,
+   once per session.
 2. ``recall(query, mode)`` — called by the volatile-layer prompt builder to
    fetch relevant cross-session context; returns a list of plain-text excerpts
    that get joined and injected into the system prompt.

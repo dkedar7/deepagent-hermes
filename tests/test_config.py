@@ -133,9 +133,9 @@ def test_env_override_bool(monkeypatch):
 
 
 def test_env_override_csv_list(monkeypatch):
-    monkeypatch.setenv("DEEPAGENT_HERMES_PLUGINS_ENABLED", "honcho, mem0 , byterover")
+    monkeypatch.setenv("DEEPAGENT_HERMES_PLUGINS_ENABLED", "markdown, foo , bar")
     cfg = HermesConfig.resolve(use_toml=False)
-    assert cfg.plugins_enabled == ["honcho", "mem0", "byterover"]
+    assert cfg.plugins_enabled == ["markdown", "foo", "bar"]
 
 
 def test_env_override_float(monkeypatch):

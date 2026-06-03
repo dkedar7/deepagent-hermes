@@ -48,7 +48,6 @@ Thumbs.db
 .env.local
 *.pem
 *.key
-honcho.json
 config.local.yaml
 
 # Logs

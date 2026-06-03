@@ -100,46 +100,11 @@ def test_abc_cannot_be_instantiated_directly() -> None:
         MemoryProvider()  # type: ignore[abstract]
 
 
-def test_honcho_provider_registers_on_import() -> None:
-    """Importing the bundled honcho plug-in module should register it under
-    the name 'honcho' — even if the honcho-ai SDK isn't installed (init
-    is lazy, setup_session is what raises)."""
-    # Import the bundled plug-in package — this is the only side effect we
-    # care about for this test.
-    import deepagent_hermes.plugins.builtin.honcho_provider  # noqa: F401
+def test_markdown_provider_registers_on_import() -> None:
+    """Importing the bundled markdown plug-in module should register it under
+    the name 'markdown' — the zero-dep default provider."""
+    import deepagent_hermes.plugins.builtin.markdown_provider  # noqa: F401
 
-    cls = get_provider("honcho")
+    cls = get_provider("markdown")
     assert cls is not None
-    # Subclass check — confirms it implements the ABC contract
     assert issubclass(cls, MemoryProvider)
-
-
-def test_honcho_provider_raises_helpful_error_when_sdk_missing() -> None:
-    """When honcho-ai isn't installed, setup_session must raise an ImportError
-    with the install command in the message — not just a bare 'no module' error.
-    """
-    import sys
-
-    import deepagent_hermes.plugins.builtin.honcho_provider as hp_module  # noqa: F401
-
-    HonchoProvider = get_provider("honcho")
-    inst = HonchoProvider()
-
-    # If honcho IS installed (CI variant), we skip — the error path is what
-    # we're testing here.
-    if "honcho" in sys.modules or _honcho_importable():
-        pytest.skip("honcho-ai is installed; can't test missing-SDK error path")
-
-    with pytest.raises(ImportError, match="pip install deepagent-hermes\\[honcho\\]"):
-        inst.setup_session("s1", user_id="u1")
-
-
-def _honcho_importable() -> bool:
-    """True iff ``import honcho`` would succeed right now."""
-    import importlib
-
-    try:
-        importlib.import_module("honcho")
-        return True
-    except ImportError:
-        return False

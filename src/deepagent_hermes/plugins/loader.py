@@ -288,8 +288,9 @@ class HermesPluginLoader:
         """Import a directory plugin's ``__init__.py`` and return its ``register``."""
         assert plugin.path is not None
         init_file = plugin.path / "__init__.py"
-        # Namespace the import so two plugins named ``honcho`` from different
-        # sources don't collide in ``sys.modules``.
+        # Namespace the import so two plugins with the same name from
+        # different sources (bundled vs user vs project) don't collide in
+        # ``sys.modules``.
         mod_name = f"deepagent_hermes_plugin_{plugin.source}_{plugin.name}"
         spec = importlib.util.spec_from_file_location(mod_name, init_file)
         if spec is None or spec.loader is None:

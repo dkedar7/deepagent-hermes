@@ -2,6 +2,14 @@
 
 **Version**: 0.1 (draft)
 **Date**: 2026-06-01
+
+> **v0.1.1 delta (2026-06-03)**: §13.2 / D6 — **Honcho is no longer bundled.**
+> The `MemoryProvider` plugin slot remains, but the bundled implementation is now
+> `MarkdownProvider`: keyword search over `<HERMES_HOME>/memories/notes/*.md`,
+> zero external dependencies. Honcho can still be plugged in as a third-party
+> package via the `deepagent_hermes.plugins` entry-point — it just isn't shipped
+> in this repo anymore. References to `HonchoProvider` / `[honcho]` extra below
+> are historical.
 **Goal**: Reproduce Nous Research's Hermes Agent (v0.15.1) on LangGraph + `deepagents` + `langgraph-stream-parser`, as faithfully as the platform allows. Divergences from Hermes are explicitly enumerated as **PLATFORM-FORCED** or **OUT-OF-SCOPE**.
 
 **Naming**: project = `deepagent-hermes` (fits the `deepagent-*` family — `lab`, `code`, `vscode`).
