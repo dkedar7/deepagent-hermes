@@ -43,13 +43,42 @@ uv pip install deepagent-hermes
 ### Optional extras
 
 ```bash
+pip install "deepagent-hermes[openai]"     # OpenAI / OpenRouter / any OpenAI-wire provider
 pip install "deepagent-hermes[daytona]"    # Daytona sandbox terminal backend
 pip install "deepagent-hermes[modal]"      # Modal sandbox terminal backend
 pip install "deepagent-hermes[ssh]"        # paramiko-backed SSH terminal backend
 pip install "deepagent-hermes[dev]"        # tests + lint (contributors only)
 ```
 
-`ANTHROPIC_API_KEY` is required for the default model (`anthropic:claude-sonnet-4-5-20250929`). Swap the model via `--model` on the CLI or `model.default` in `deepagent-hermes.toml` — any [`init_chat_model`](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html) string works.
+## Picking a model
+
+By default the agent uses `anthropic:claude-sonnet-4-5-20250929` and needs `ANTHROPIC_API_KEY` set. Swap the model via `--model` on the CLI or `model.default` in `deepagent-hermes.toml` — any [`init_chat_model`](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html) string works.
+
+### OpenAI / OpenRouter
+
+```bash
+pip install "deepagent-hermes[openai]"
+export OPENAI_API_KEY=sk-…                   # or: OPENROUTER_API_KEY=sk-or-v1-…
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1   # only for OpenRouter
+deepagent-hermes chat --model openai:openai/gpt-4o-mini
+```
+
+For OpenRouter specifically you usually also want:
+
+```bash
+export DEEPAGENT_HERMES_MODEL_DEFAULT="openai:openai/gpt-4o-mini"
+export DEEPAGENT_HERMES_MODEL_AUX="openai:openai/gpt-4o-mini"
+```
+
+so the reflection subagent uses the same cheap model.
+
+### Verify your setup
+
+```bash
+deepagent-hermes verify
+```
+
+does one live round-trip against the configured model and confirms the prompts, bundled skills, and FTS5 store all wire up correctly. Run this first on any fresh install — if it passes, `chat` will work.
 
 ## Quick start
 

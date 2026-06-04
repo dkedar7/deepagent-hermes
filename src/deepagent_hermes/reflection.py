@@ -90,23 +90,21 @@ logger = logging.getLogger(__name__)
 
 
 _PROMPT_PACKAGE = "deepagent_hermes._prompts"
-# Fallback to in-repo `prompts/` dir during dev when shared-data hasn't been moved.
-_REPO_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+_PROMPTS_DIR = Path(__file__).resolve().parent / "_prompts"
 
 
 def load_prompt(name: str) -> str:
     """Read a prompt file by relative name (e.g. ``"combined_review.md"``).
 
-    Prefers the bundled ``deepagent_hermes/_prompts/`` resource installed via
-    ``[tool.hatch.build.targets.wheel.shared-data]`` so wheels carry the prompts
-    without a source checkout. Falls back to the repo-relative ``prompts/`` dir
-    when the package-data move hasn't happened yet (e.g. editable install in
-    early dev).
+    Prompts live inside the package at ``deepagent_hermes/_prompts/`` (as of
+    v0.1.2). We try ``importlib.resources`` first because it's the supported
+    cross-installer path; on the rare loader that doesn't expose package data
+    that way we fall back to a direct filesystem read next to ``__file__``.
     """
     try:
         return resources.files(_PROMPT_PACKAGE).joinpath(name).read_text(encoding="utf-8")
     except (FileNotFoundError, ModuleNotFoundError, AttributeError):
-        path = _REPO_PROMPTS_DIR.joinpath(name)
+        path = _PROMPTS_DIR.joinpath(name)
         if path.is_file():
             return path.read_text(encoding="utf-8")
         msg = f"prompt not found: {name} (tried package {_PROMPT_PACKAGE!r} and {path})"

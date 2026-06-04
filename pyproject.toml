@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepagent-hermes"
-version = "0.1.1"
+version = "0.1.2"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,9 +33,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openai = ["langchain-openai>=0.2"]
 daytona = ["daytona-sdk>=0.10"]
 modal = ["modal>=0.64"]
 ssh = ["paramiko>=3.0"]
+# `real` is the test-suite alias for `openai` — kept so tests/test_real_model.py
+# keeps working without contributors having to remember a new extras name.
 real = ["langchain-openai>=0.2"]
 dev = [
     "pytest>=8.0",
@@ -55,9 +58,19 @@ Issues = "https://github.com/dkedar7/deepagent-hermes/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deepagent_hermes"]
+# Bundled prompt files + 26 SKILL.md library both live inside the package
+# tree now (src/deepagent_hermes/_prompts/, src/deepagent_hermes/_bundled_skills/);
+# hatch's default file selection picks them up automatically. The earlier
+# `shared-data` table put files under `share/` at install time — i.e. NOT
+# inside the package — which is why v0.1.0 / v0.1.1 wheels crashed on first
+# chat.
 
-[tool.hatch.build.targets.wheel.shared-data]
-"prompts" = "deepagent_hermes/_prompts"
+[tool.hatch.build.targets.sdist]
+# Include the bundled markdown assets so `pip install <sdist>` is also runnable.
+include = [
+    "src/deepagent_hermes/_prompts/**/*.md",
+    "src/deepagent_hermes/_bundled_skills/**",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -76,10 +89,10 @@ markers = [
 [tool.ruff]
 line-length = 130
 target-version = "py311"
-# Vendored, standalone agent-skill scripts (not part of the shipped package).
-# They keep upstream-faithful patterns ruff dislikes (sys.path setup before
-# imports, re-export aliases), so don't lint or reformat them.
-extend-exclude = ["skills"]
+# Vendored, standalone agent-skill scripts inside bundled SKILL.md packages —
+# upstream patterns ruff dislikes (sys.path setup before imports, re-export
+# aliases, etc.). Not part of our source surface; don't lint or reformat.
+extend-exclude = ["src/deepagent_hermes/_bundled_skills/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "PL", "RUF"]

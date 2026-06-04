@@ -39,7 +39,12 @@ import re
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from deepagent_hermes.memory.provider import MemoryProvider, RecallMode, register_provider
+from deepagent_hermes.memory.provider import (
+    MemoryProvider,
+    RecallMode,
+    available_providers,
+    register_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,4 +162,23 @@ class MarkdownProvider(MemoryProvider):
 register_provider("markdown", MarkdownProvider)
 
 
-__all__ = ["MarkdownProvider", "search_notes"]
+def register(ctx: object) -> None:
+    """No-op plugin-loader entry point.
+
+    The plugin loader (SPEC §15) calls ``register(ctx)`` on every discovered
+    plugin's ``__init__.py``. We don't *need* it — registration into the
+    memory-provider registry already happens at import time via the
+    ``register_provider(...)`` call above, and that's what the agent factory
+    consults. But the loader's contract requires a callable named ``register``,
+    so we provide one that just confirms the import side-effect happened.
+
+    Before v0.1.2 this function was missing, which made the loader log
+    ``"Plugin 'markdown-provider' has no callable register()"`` on every
+    fresh-install ``plugins list`` — embarrassing.
+    """
+    del ctx
+    if "markdown" not in available_providers():  # pragma: no cover — defensive
+        register_provider("markdown", MarkdownProvider)
+
+
+__all__ = ["MarkdownProvider", "register", "search_notes"]

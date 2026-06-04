@@ -58,19 +58,16 @@ if TYPE_CHECKING:
 
 
 _PROMPT_PACKAGE = "deepagent_hermes._prompts"
-# Editable-install fallback: the repo-relative ``prompts/`` dir before the
-# shared-data wheel move has happened.
-_REPO_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+_PROMPTS_DIR = Path(__file__).resolve().parent / "_prompts"
 
 
 def load_prompt(name: str) -> str:
     """Read a prompt file by relative name (e.g. ``"task_completion.md"``).
 
-    Prefers the bundled ``deepagent_hermes/_prompts/`` resource installed via
-    ``[tool.hatch.build.targets.wheel.shared-data]`` so wheels carry the prompts
-    without a source checkout. Falls back to the repo-relative ``prompts/`` dir
-    when the package-data move hasn't happened yet (e.g. editable install in
-    early dev).
+    Prompts live inside the package at ``deepagent_hermes/_prompts/`` (as of
+    v0.1.2 — previously the broken ``shared-data`` config left wheels without
+    them). Direct filesystem fallback covers loaders that don't expose
+    ``importlib.resources``.
 
     Returns ``""`` if the file does not exist — callers append-and-strip, so a
     missing optional prompt should not break assembly.
@@ -78,7 +75,7 @@ def load_prompt(name: str) -> str:
     try:
         return resources.files(_PROMPT_PACKAGE).joinpath(name).read_text(encoding="utf-8")
     except (FileNotFoundError, ModuleNotFoundError, AttributeError, NotADirectoryError):
-        path = _REPO_PROMPTS_DIR.joinpath(name)
+        path = _PROMPTS_DIR.joinpath(name)
         if path.is_file():
             return path.read_text(encoding="utf-8")
         return ""
