@@ -35,12 +35,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MutationRow", "SkillAuditLog", "RollbackError"]
+__all__ = ["MutationRow", "RollbackError", "SkillAuditLog"]
 
 
-VALID_ACTIONS: frozenset[str] = frozenset(
-    {"create", "patch", "write_file", "delete", "pin", "unpin", "rollback"}
-)
+VALID_ACTIONS: frozenset[str] = frozenset({"create", "patch", "write_file", "delete", "pin", "unpin", "rollback"})
 
 
 class RollbackError(RuntimeError):
@@ -78,9 +76,18 @@ class MutationRow:
             d = dict(row)
         else:
             cols = (
-                "id", "timestamp", "skill_name", "action", "source",
-                "session_id", "tool_call_id", "skill_path",
-                "before_hash", "after_hash", "before_content", "after_content",
+                "id",
+                "timestamp",
+                "skill_name",
+                "action",
+                "source",
+                "session_id",
+                "tool_call_id",
+                "skill_path",
+                "before_hash",
+                "after_hash",
+                "before_content",
+                "after_content",
             )
             d = dict(zip(cols, row, strict=False))
         return cls(
@@ -256,9 +263,7 @@ class SkillAuditLog:
 
     def get(self, mutation_id: int) -> MutationRow | None:
         """Fetch a single mutation by id."""
-        row = self._conn.execute(
-            "SELECT * FROM skill_mutations WHERE id = ?", (mutation_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM skill_mutations WHERE id = ?", (mutation_id,)).fetchone()
         return MutationRow.from_row(row) if row else None
 
     def latest_for(self, skill_name: str) -> MutationRow | None:
@@ -326,10 +331,7 @@ class SkillAuditLog:
         if target is None:
             raise RollbackError(f"mutation #{mutation_id} not found")
         if target.skill_name != skill_name:
-            raise RollbackError(
-                f"mutation #{mutation_id} is for skill {target.skill_name!r}, "
-                f"not {skill_name!r}"
-            )
+            raise RollbackError(f"mutation #{mutation_id} is for skill {target.skill_name!r}, not {skill_name!r}")
         if not target.skill_path:
             raise RollbackError(f"mutation #{mutation_id} has no skill_path recorded")
         if target.before_content is None:

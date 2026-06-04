@@ -12,7 +12,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import frontmatter
 import pytest
 
 from deepagent_hermes.skills.audit import RollbackError, SkillAuditLog
@@ -107,12 +106,28 @@ def test_patch_records_via_skill_manage(library: SkillLibrary, audit_log: SkillA
 def test_pin_records_pin_and_unpin(library: SkillLibrary, audit_log: SkillAuditLog):
     library.write("gamma", {"name": "gamma", "description": "g"}, "body\n")
     _skill_manage_impl(
-        library, action="pin", name="gamma", description="", body="", category="",
-        old_str="", new_str="", frontmatter_data=None, tool_call_id="tc-pin",
+        library,
+        action="pin",
+        name="gamma",
+        description="",
+        body="",
+        category="",
+        old_str="",
+        new_str="",
+        frontmatter_data=None,
+        tool_call_id="tc-pin",
     )
     _skill_manage_impl(
-        library, action="unpin", name="gamma", description="", body="", category="",
-        old_str="", new_str="", frontmatter_data=None, tool_call_id="tc-unpin",
+        library,
+        action="unpin",
+        name="gamma",
+        description="",
+        body="",
+        category="",
+        old_str="",
+        new_str="",
+        frontmatter_data=None,
+        tool_call_id="tc-unpin",
     )
     rows = audit_log.list(skill_name="gamma")
     assert [r.action for r in rows] == ["unpin", "pin", "create"]
@@ -253,9 +268,7 @@ def test_audit_log_creates_table_idempotently(home: Path):
     SkillAuditLog(db_path=str(home / "state.db")).close()
     # The table must exist after either init.
     with sqlite3.connect(str(home / "state.db")) as conn:
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='skill_mutations'"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='skill_mutations'")
         assert cur.fetchone() is not None
 
 

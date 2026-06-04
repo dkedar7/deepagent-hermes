@@ -302,7 +302,7 @@ class SkillLibrary:
                 tool_call_id=self._mutation_tool_call_id,
                 skill_path=skill_path,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to record %s mutation for skill %s", action, skill_name, exc_info=True)
 
     def write(
