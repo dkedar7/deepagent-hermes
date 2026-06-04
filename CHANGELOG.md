@@ -5,6 +5,41 @@ All notable changes to `deepagent-hermes` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-06-04
+
+### Fixed — fresh-install ship-blockers
+
+A first-time-user audit caught three bugs that made v0.1.0 / v0.1.1 unusable straight off PyPI. Every fresh install starting today should land cleanly.
+
+- **Bundled prompts were missing from the wheel.** `pyproject.toml` used `[tool.hatch.build.targets.wheel.shared-data]` to ship `prompts/` — which puts files in `share/` at install time, **not inside the package**. Every `deepagent-hermes chat` died with `prompt not found: combined_review.md`. Moved `prompts/` → `src/deepagent_hermes/_prompts/` so they ship via the normal package-data path.
+- **Bundled 26 SKILL.md files were also missing.** Same root cause + `agent.py:_default_skill_dirs` walked `Path(__file__).parent.parent.parent` to find them — which resolved to `Lib/` on PyPI installs. Moved `skills/` → `src/deepagent_hermes/_bundled_skills/` and updated the resolver to look at `Path(__file__).parent / "_bundled_skills"`.
+- **`MarkdownProvider` plugin failed to load on every fresh install.** The bundled plugin self-registered via the memory-provider registry on import, but the plugin loader expected a `register(ctx)` function and logged `"Plugin 'markdown-provider' has no callable register()"` whenever you ran `plugins list`. Added a no-op `register(ctx)` that confirms the import side-effect happened.
+
+### Added
+
+- **`deepagent-hermes verify`** — single command that does an end-to-end smoke: checks bundled prompts + skills are packaged, HERMES_HOME is writable, the API key matches the model, builds the agent, makes one real model call, confirms the FTS5 store persisted the turn. Run this first on any fresh install — if it passes, `chat` will work. ~3-5s + ~1¢ on gpt-4o-mini.
+- **`[openai]` extras dependency** — `pip install "deepagent-hermes[openai]"` pulls in `langchain-openai>=0.2` for OpenAI / OpenRouter / any OpenAI-wire provider. Previously you got a langchain-internal `ChatOpenAI requires the langchain-openai package` error and had to figure it out from the traceback.
+- **README section "Picking a model"** with explicit OpenAI / OpenRouter instructions and a pointer to `verify`.
+- **`doctor` now mentions `OPENAI_API_KEY` / `OPENROUTER_API_KEY`** when set, instead of pretending only Anthropic keys count.
+
+### Carried forward from unreleased work on `main`
+
+The v0.1.1 → v0.1.2 window also picked up the UI hookup work that landed on `main` after v0.1.1 shipped (PR #5):
+
+- `skills list / show / install / audit`, `tools`, `curator status / run / pause / resume / pin / unpin` — all real now (were `TBD` stubs in v0.1.1).
+- Inline slash commands `/skills /tools /toolsets /cron /curator /memory` work without redirecting to subcommands.
+- `session_id` threaded properly through the chat REPL (was being manufactured fresh every turn — broke cross-turn FTS5 lineage).
+- Pretty `◆` callouts for `skill_event` / `memory_updated` / `compression_summary` in the chat stream.
+- Real bug fixed in the store: `SqliteFtsStore._do_put` silently dropped any non-`messages`/`sessions` namespace — meaning **every curator state write since shipping had been a no-op**. Added an `_KV_NAMESPACES` allow-list (currently `curator_state`).
+
+### Validation
+
+- 423 tests pass / 3 skipped (Docker / Singularity binaries absent, real-model eval skipped without `OPENROUTER_API_KEY`).
+- Ruff clean.
+- Built local wheel + installed into a fresh `uv` venv + ran `verify` against gpt-4o-mini through OpenRouter: full pass.
+
+[0.1.2]: https://github.com/dkedar7/deepagent-hermes/releases/tag/v0.1.2
+
 ## [0.1.1] — 2026-06-03
 
 ### Changed — bundled memory provider

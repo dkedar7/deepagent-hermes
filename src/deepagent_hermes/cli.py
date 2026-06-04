@@ -632,8 +632,7 @@ def _skill_library() -> Any:
     from deepagent_hermes.skills.library import SkillLibrary
 
     dirs: list[Path] = []
-    pkg_root = Path(__file__).resolve().parent.parent.parent
-    bundled = pkg_root / "skills"
+    bundled = Path(__file__).resolve().parent / "_bundled_skills"
     if bundled.is_dir():
         dirs.append(bundled)
     dirs.append(hermes_home() / "skills")
@@ -1087,6 +1086,152 @@ def plugins_disable(name: str) -> None:
 
 
 @cli.command()
+@click.option("--model", "model_id", default=None, help="Override model for this verify run.")
+def verify(model_id: str | None) -> None:
+    """End-to-end smoke: one live model round-trip + write the side effects.
+
+    Catches the kinds of fresh-install problems ``doctor`` misses — packaging
+    bugs that hide bundled prompts or skills, an API key that the SDK can't
+    actually authenticate with, FTS5 init failing, etc. If this passes, the
+    chat REPL will work.
+
+    Honest about cost: this makes a single model call (one prompt, ≤20 tokens
+    of output). On the default Anthropic Sonnet 4.5 that's a fraction of a
+    cent; on gpt-4o-mini via OpenRouter it's effectively free.
+    """
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from deepagent_hermes.config import HermesConfig, hermes_home
+
+    click.echo(click.style("deepagent-hermes verify — live end-to-end smoke", fg="cyan", bold=True))
+    click.echo()
+
+    # ── (1) packaging / bundled assets ───────────────────────────────────
+    pkg_dir = Path(__file__).resolve().parent
+    prompts_dir = pkg_dir / "_prompts"
+    skills_dir = pkg_dir / "_bundled_skills"
+    needed_prompts = [
+        "default_identity.md", "combined_review.md", "skill_review.md",
+        "memory_review.md", "compression_summary.md",
+    ]
+    missing = [p for p in needed_prompts if not (prompts_dir / p).is_file()]
+    if missing:
+        click.echo(click.style(f"  ✗ bundled prompts missing: {missing}", fg="red"))
+        click.echo(click.style(f"    expected under {prompts_dir}", fg="bright_black"))
+        click.echo(click.style("    this is the v0.1.0/v0.1.1 packaging bug — upgrade to v0.1.2+", fg="yellow"))
+        sys.exit(2)
+    click.echo(click.style(f"  ✓ bundled prompts ({len(needed_prompts)} critical) present", fg="green"))
+
+    n_bundled = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
+    if n_bundled == 0:
+        click.echo(click.style("  ⚠ no bundled SKILL.md files found", fg="yellow"))
+        click.echo(click.style(
+            f"    expected at {skills_dir} — agent will still run with an empty library",
+            fg="bright_black",
+        ))
+    else:
+        click.echo(click.style(f"  ✓ bundled skills: {n_bundled} SKILL.md files", fg="green"))
+
+    # ── (2) HERMES_HOME writability ──────────────────────────────────────
+    home = hermes_home()
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        probe = home / ".verify_write_test"
+        probe.write_text("ok")
+        probe.unlink()
+        click.echo(click.style(f"  ✓ HERMES_HOME writable ({home})", fg="green"))
+    except OSError as e:
+        click.echo(click.style(f"  ✗ HERMES_HOME not writable ({home}): {e}", fg="red"))
+        sys.exit(2)
+
+    # ── (3) model API key sanity ─────────────────────────────────────────
+    cfg = HermesConfig.resolve()
+    model_for_run = model_id or cfg.model_default
+    click.echo(click.style(f"  · model:  {model_for_run}", fg="bright_black"))
+    if model_for_run.startswith("anthropic:") and not os.getenv("ANTHROPIC_API_KEY"):
+        click.echo(click.style("  ✗ model is anthropic:* but ANTHROPIC_API_KEY not set", fg="red"))
+        sys.exit(2)
+    if model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+        click.echo(click.style("  ✗ model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set", fg="red"))
+        sys.exit(2)
+
+    # ── (4) build the agent in an isolated workspace ─────────────────────
+    workspace = Path(tempfile.mkdtemp(prefix="dah-verify-"))
+    click.echo(click.style(f"  · isolated workspace: {workspace}", fg="bright_black"))
+
+    overrides: dict[str, Any] = {}
+    if model_id:
+        overrides["model_default"] = model_id
+
+    t0 = time.perf_counter()
+    try:
+        cfg_for_run = HermesConfig.resolve(overrides=overrides) if overrides else cfg
+        from deepagent_hermes import create_hermes_agent
+
+        agent = create_hermes_agent(cfg_for_run, workspace=workspace, session_id="verify-001")
+    except Exception as e:
+        click.echo(click.style(f"  ✗ agent build failed: {type(e).__name__}: {e}", fg="red"))
+        sys.exit(2)
+    build_s = time.perf_counter() - t0
+    click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
+
+    # ── (5) one real round-trip ──────────────────────────────────────────
+    click.echo(click.style("  · invoking model with 'reply yes/no: are you working?' ...", fg="bright_black"))
+    t0 = time.perf_counter()
+    try:
+        result = agent.invoke(
+            {
+                "messages": [{"role": "user", "content": "Reply with one word, either YES or NO: are you working?"}],
+                "session_id": "verify-001",
+                "iteration_budget_remaining": 5,
+            },
+            config={"configurable": {"thread_id": "verify-001"}},
+        )
+    except Exception as e:
+        click.echo(click.style(f"  ✗ model invoke failed: {type(e).__name__}: {e}", fg="red"))
+        click.echo(click.style("    (auth error? rate limit? check the API key + model id)", fg="bright_black"))
+        sys.exit(2)
+    invoke_s = time.perf_counter() - t0
+
+    msgs = result.get("messages", [])
+    last_ai = next((m for m in reversed(msgs) if getattr(m, "type", None) == "ai"), None)
+    content = getattr(last_ai, "content", "")
+    if isinstance(content, list):
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    if not content:
+        click.echo(click.style("  ✗ model returned an empty response", fg="red"))
+        sys.exit(2)
+    click.echo(click.style(f"  ✓ model round-trip in {invoke_s:.1f}s: {content.strip()[:80]!r}", fg="green"))
+
+    # ── (6) FTS5 store wrote the turn ────────────────────────────────────
+    import sqlite3
+
+    db = home / "state.db"
+    if not db.exists():
+        click.echo(click.style("  ✗ FTS5 store wasn't created", fg="red"))
+        sys.exit(2)
+    conn = sqlite3.connect(str(db))
+    try:
+        n_sess = conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("verify-001",)).fetchone()[0]
+        n_msgs = conn.execute("SELECT COUNT(*) FROM messages WHERE session_id = ?", ("verify-001",)).fetchone()[0]
+    finally:
+        conn.close()
+    if n_sess == 0:
+        click.echo(click.style("  ⚠ session row not recorded in FTS5 store", fg="yellow"))
+    else:
+        click.echo(click.style(f"  ✓ FTS5 store: {n_sess} session(s), {n_msgs} message(s) recorded", fg="green"))
+
+    click.echo()
+    click.echo(click.style("VERIFY: PASS — runtime is wired end-to-end.", fg="green", bold=True))
+    click.echo(click.style(
+        "  next: `deepagent-hermes chat`  (or set DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph in a host)",
+        fg="bright_black",
+    ))
+
+
+@cli.command()
 def doctor() -> None:
     """Sanity check: Python version, deps, env vars, HERMES_HOME writability."""
     from deepagent_hermes.config import hermes_home
@@ -1106,7 +1251,11 @@ def doctor() -> None:
     if os.getenv("ANTHROPIC_API_KEY"):
         click.echo("  ANTHROPIC_API_KEY: set")
     else:
-        click.echo("  ANTHROPIC_API_KEY: not set (required for anthropic:* models)")
+        click.echo("  ANTHROPIC_API_KEY: not set (required for the default anthropic:* model)")
+
+    for var in ("OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+        if os.getenv(var):
+            click.echo(f"  {var}: set")
 
     home = hermes_home()
     try:

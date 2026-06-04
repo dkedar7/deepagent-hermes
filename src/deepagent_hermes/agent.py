@@ -53,11 +53,15 @@ log = logging.getLogger(__name__)
 
 
 def _default_skill_dirs(cfg: HermesConfig) -> list[Path]:
-    """Resolution order matches SPEC §10.2 — later wins on name collision."""
+    """Resolution order matches SPEC §10.2 — later wins on name collision.
+
+    Bundled skills ship inside the wheel at ``deepagent_hermes/_bundled_skills/``
+    (not at the repo root). Pre-v0.1.2 this looked three parents up from
+    ``agent.py``, which worked for editable installs but resolved to ``Lib/``
+    on PyPI installs — leaving fresh users with no bundled skills.
+    """
     dirs: list[Path] = []
-    # Bundled (shipped with the package; usually empty in v0.1.0a0).
-    pkg_root = Path(__file__).resolve().parent.parent.parent
-    bundled = pkg_root / "skills"
+    bundled = Path(__file__).resolve().parent / "_bundled_skills"
     if bundled.is_dir():
         dirs.append(bundled)
     # User-global.

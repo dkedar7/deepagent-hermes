@@ -14,7 +14,7 @@ import pytest
 from deepagent_hermes.skills.validator import validate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUNDLED_DIR = REPO_ROOT / "skills"
+BUNDLED_DIR = REPO_ROOT / "src" / "deepagent_hermes" / "_bundled_skills"
 
 
 def _all_skill_files() -> list[Path]:
