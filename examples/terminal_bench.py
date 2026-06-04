@@ -288,18 +288,34 @@ class DeepagentHermesAgent(BaseAgent):
         start = time.monotonic()
         graph = create_hermes_agent(cfg, backend=backend)
 
+        # Harbor passes a freshly-constructed AgentContext whose `metadata`
+        # is None. Initialise it before writing so we don't TypeError on
+        # the error path.
+        if context.metadata is None:
+            context.metadata = {}
+
         # The instruction is the user's first turn. LangGraph's recursion
         # limit (1000) covers tool-call ping-pong; the iteration budget
         # middleware enforces the agent-level cap (default 10).
+        #
+        # We call the SYNC `invoke()` on a worker thread instead of
+        # `await ainvoke(...)`. Reason: the agent's checkpointer is
+        # SqliteSaver, which does not implement the async API (`aget_tuple`
+        # raises NotImplementedError). Wrapping in `to_thread` lets the
+        # graph drive its tools synchronously while the HarborSandboxBackend
+        # still bridges back into this event loop via
+        # `run_coroutine_threadsafe` to call `env.exec(...)`.
         try:
-            final = await graph.ainvoke(
+            final = await asyncio.to_thread(
+                graph.invoke,
                 {"messages": [{"role": "user", "content": instruction}]},
-                config={"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
+                {"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
             )
         except Exception as exc:
             elapsed = time.monotonic() - start
             self.logger.exception("deepagent-hermes agent crashed after %.1fs: %s", elapsed, exc)
             context.metadata["error"] = str(exc)
+            context.metadata["elapsed_sec"] = round(elapsed, 1)
             return
 
         elapsed = time.monotonic() - start
