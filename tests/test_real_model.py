@@ -19,11 +19,11 @@ Opt-in: skips unless ``OPENROUTER_API_KEY`` is set and ``langchain-openai`` (the
     uv pip install -e ".[dev,real]"
     OPENROUTER_API_KEY=... pytest tests/test_real_model.py -v
 """
+
 from __future__ import annotations
 
 import os
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -70,9 +70,7 @@ def test_real_reflection_cycle_runs_and_persists_state(tmp_path: Path):
 
     last_iters = None
     for prompt in prompts:
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": prompt}]}, config=config
-        )
+        result = agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config=config)
         msgs = result.get("messages", [])
         assert any(getattr(m, "type", None) == "ai" for m in msgs), "expected an AI reply"
         last_iters = result.get("iters_since_skill", last_iters)
