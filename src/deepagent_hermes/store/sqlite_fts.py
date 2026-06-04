@@ -138,12 +138,38 @@ CREATE TABLE IF NOT EXISTS curator_state (
     value TEXT
 );
 
+-- Skill mutation log: every create / patch / write_file / delete / pin / unpin
+-- the agent or CLI performs lands here so we can diff and roll back. The
+-- before/after blobs are full SKILL.md content (frontmatter + body) so a
+-- rollback is a single read + write — no need to replay a chain of patches.
+-- Sized for thousands of mutations per HERMES_HOME, not millions; if your
+-- agent rewrites a skill in a tight loop, the bound is wall-clock disk
+-- pressure, not row count.
+CREATE TABLE IF NOT EXISTS skill_mutations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    skill_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    source TEXT,
+    session_id TEXT,
+    tool_call_id TEXT,
+    skill_path TEXT,
+    before_hash TEXT,
+    after_hash TEXT,
+    before_content BLOB,
+    after_content BLOB
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_session_active
     ON messages(session_id, active, timestamp);
+CREATE INDEX IF NOT EXISTS idx_skill_mutations_name_ts
+    ON skill_mutations(skill_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_mutations_session
+    ON skill_mutations(session_id);
 """
 
 # FTS5 virtual tables + triggers. content is the indexed payload; we
