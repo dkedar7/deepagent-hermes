@@ -23,7 +23,20 @@ A `deepagents`-built agent with a **closed reflection→skill-creation loop**:
 - **FTS5 session search** indexes every past conversation in a local SQLite DB.
 - Bundled **MarkdownProvider** that keyword-searches `<HERMES_HOME>/memories/notes/*.md` — drop hand-authored long-form context there and the agent surfaces relevant sections on demand. Zero external dependencies.
 
-Designed to be loaded into the existing `deepagent-*` host family ([`deepagent-code`](https://github.com/dkedar7/deepagent-code), [`deepagent-lab`](https://github.com/dkedar7/deepagent-lab), [`cowork-dash`](https://github.com/dkedar7/cowork-dash), [`deepagent-vscode`](https://github.com/dkedar7/deepagent-vscode)) without UI changes — set `DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph` in any of them.
+Designed to be loaded into the existing `deepagent-*` host family without UI changes — set `DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph` in any of them.
+
+## One agent, every surface
+
+deepagent-hermes is the reference agent of the **deep-agent family**: write your agent once — any LangGraph `CompiledGraph` — and run it on every surface with the same spec string (`module:attr` or `path/to/file.py:attr`), the same `deepagents.toml` config file, and the same `DEEPAGENT_*` environment variables.
+
+| Surface | Package | Try it |
+|---|---|---|
+| Web app | [cowork-dash](https://github.com/dkedar7/cowork-dash) | `cowork-dash run --agent deepagent_hermes.agent:graph` |
+| JupyterLab | [deepagent-lab](https://github.com/dkedar7/deepagent-lab) | `pip install deepagent-lab`, then the chat sidebar in `jupyter lab` |
+| Terminal | [deepagent-code](https://github.com/dkedar7/deepagent-code) | `deepagent-code -a deepagent_hermes.agent:graph` |
+| VS Code | [deepagent-vscode](https://github.com/dkedar7/deepagent-vscode) | chat participant + stdio sidecar |
+| Reference agent | deepagent-hermes | **you are here** |
+| Shared core | [langgraph-stream-parser](https://github.com/dkedar7/langgraph-stream-parser) | typed events + config resolver behind every surface |
 
 ## Installation
 
@@ -88,6 +101,10 @@ deepagent-hermes --show-config
 
 # interactive chat
 deepagent-hermes chat
+
+# chat against a different agent (same spec format as every deep-agent
+# surface; overrides DEEPAGENT_AGENT_SPEC)
+deepagent-hermes chat -a my_agent.py:graph
 
 # from inside chat:
 #   /skills            list available skills
