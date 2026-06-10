@@ -237,12 +237,13 @@ def _try_import_agent() -> tuple[Any | None, str | None]:
     return factory, None
 
 
-def _resolve_agent() -> tuple[Any | None, str, str | None]:
-    """Resolve the chat agent source — spec env var or built-in factory.
+def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None]:
+    """Resolve the chat agent source — flag/spec env var or built-in factory.
 
-    The ``DEEPAGENT_AGENT_SPEC`` env var is the host-adoption convention
+    ``spec`` (the ``-a/--agent`` CLI flag) wins; otherwise the
+    ``DEEPAGENT_AGENT_SPEC`` env var is the host-adoption convention
     every deep-agent surface respects (cowork-dash, deepagent-code, …).
-    If it's set, honour it here too: load the named callable/graph via
+    If either is set, honour it here too: load the named callable/graph via
     :func:`langgraph_stream_parser.load_agent_spec`. If not, fall through
     to the built-in ``create_hermes_agent`` factory.
 
@@ -265,7 +266,7 @@ def _resolve_agent() -> tuple[Any | None, str, str | None]:
     check below catches the common typo ("pointed the spec at a
     module, not a graph") without that cost.
     """
-    spec = os.environ.get("DEEPAGENT_AGENT_SPEC")
+    spec = spec or os.environ.get("DEEPAGENT_AGENT_SPEC")
     if spec:
         try:
             from langgraph_stream_parser import load_agent_spec
@@ -274,20 +275,20 @@ def _resolve_agent() -> tuple[Any | None, str, str | None]:
                 None,
                 "spec",
                 (
-                    f"DEEPAGENT_AGENT_SPEC={spec!r} is set but langgraph-stream-parser "
+                    f"agent spec {spec!r} is set but langgraph-stream-parser "
                     f"is not installed (or load_agent_spec is missing): {e}"
                 ),
             )
         try:
             target = load_agent_spec(spec)
         except Exception as e:
-            return None, "spec", f"DEEPAGENT_AGENT_SPEC={spec!r} failed to load: {e}"
+            return None, "spec", f"agent spec {spec!r} failed to load: {e}"
         if not (hasattr(target, "invoke") or callable(target)):
             return (
                 None,
                 "spec",
                 (
-                    f"DEEPAGENT_AGENT_SPEC={spec!r} loaded but the result is neither "
+                    f"agent spec {spec!r} loaded but the result is neither "
                     f"invokable nor callable (got {type(target).__name__}). The spec "
                     f"must point at a compiled LangGraph object or a callable that "
                     f"returns one."
@@ -338,15 +339,22 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
 @cli.command()
 @click.option("--model", "model_id", default=None, help="Override model for this session.")
 @click.option(
+    "--agent",
+    "-a",
+    "agent_spec",
+    default=None,
+    help="Agent spec (module:attr or path/to/file.py:attr); overrides DEEPAGENT_AGENT_SPEC.",
+)
+@click.option(
     "--workspace",
     "workspace",
     default=None,
     type=click.Path(file_okay=False, dir_okay=True),
     help="Working directory for the agent's filesystem tools.",
 )
-def chat(model_id: str | None, workspace: str | None) -> None:
+def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) -> None:
     """Interactive chat REPL with slash-command dispatch."""
-    target, source, err = _resolve_agent()
+    target, source, err = _resolve_agent(agent_spec)
     if err:
         click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
         if source == "builtin":

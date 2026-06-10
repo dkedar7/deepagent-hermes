@@ -75,6 +75,23 @@ def test_resolve_agent_loads_factory_via_spec(monkeypatch):
     assert target is _make_graph  # callable, not instance — chat will call
 
 
+def test_resolve_agent_explicit_arg_works_without_env(monkeypatch):
+    """The -a/--agent CLI flag path: explicit spec, env unset."""
+    monkeypatch.delenv("DEEPAGENT_AGENT_SPEC", raising=False)
+    target, source, err = _resolve_agent(f"{__name__}:_FAKE_GRAPH_INSTANCE")
+    assert source == "spec"
+    assert err is None
+    assert target is _FAKE_GRAPH_INSTANCE
+
+
+def test_resolve_agent_explicit_arg_beats_env(monkeypatch):
+    monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "nope.does.not.exist:agent")
+    target, source, err = _resolve_agent(f"{__name__}:_FAKE_GRAPH_INSTANCE")
+    assert source == "spec"
+    assert err is None
+    assert target is _FAKE_GRAPH_INSTANCE
+
+
 def test_resolve_agent_returns_error_for_unknown_module(monkeypatch):
     monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "nope.does.not.exist:agent")
     target, source, err = _resolve_agent()
